@@ -1,80 +1,84 @@
 #!/bin/bash
 
-# ========== CONFIG ==========
-PLUGIN_SLUG=$(basename "$PWD")
-ZIP_NAME="../$PLUGIN_SLUG.zip"
-MAIN_FILE="$PLUGIN_SLUG.php"
-README_FILE="readme.txt"
-EXCLUDES=(".git/*" ".gitignore" "build/*" "release.sh" "README.md" "$ZIP_NAME")
-# ============================
+set -e
 
-abort() { echo "❌ $1"; exit 1; }
+VERSION=$1
+PLUGIN_DIR=$(basename "$PWD")
+ZIP_NAME="../${PLUGIN_DIR}.zip"
 
-VERSION="$1"
-[ -z "$VERSION" ] && abort "Usage: ./release.sh <version>"
+if [[ -z "$VERSION" ]]; then
+  echo "❌ Usage: ./release.sh <version>"
+  exit 1
+fi
 
-# Step 1: Check for Git repo
+# Make current directory safe for Git if needed
+if ! git status &>/dev/null; then
+  echo "⚠️ Git detected dubious ownership or uninitialized repo. Attempting to fix..."
+  git config --global --add safe.directory "$PWD" || true
+fi
+
+# Initialize Git if not already a repo
 if ! git rev-parse --is-inside-work-tree &>/dev/null; then
   echo "⚠️ Not currently inside a Git repository. Initializing Git..."
-  git init || abort "Git init failed"
-  git add . && git commit -m "Initial commit for $PLUGIN_SLUG"
-  echo "✅ Git repo initialized. Please manually add a remote if needed."
+  git init
+  git add .
+  git commit -m "Initial commit for $PLUGIN_DIR"
+  echo "✅ Git repo initialized. You may need to manually add a remote:"
+  echo "   git remote add origin <git@github.com:yourusername/$PLUGIN_DIR.git>"
 fi
 
-# Step 2: Handle Git "dubious ownership"
-if git status 2>&1 | grep -q "dubious ownership"; then
-  echo "⚠️ Git detected dubious ownership. Making directory safe..."
-  git config --global --add safe.directory "$PWD" || abort "Failed to mark directory safe"
-  echo "✅ Directory marked as safe for Git"
+# Update version in plugin main file
+if [[ -f "$PLUGIN_DIR.php" ]]; then
+  echo "📝 Updating version in $PLUGIN_DIR.php..."
+  sed -i "s/^\( \?\* Version:\s*\).*/\1$VERSION/" "$PLUGIN_DIR.php"
 fi
 
-# Step 3: Update plugin version in PHP and readme.txt
-echo "📝 Updating version in $MAIN_FILE..."
-sed -i "s/\(Version:\s*\).*/\1$VERSION/" "$MAIN_FILE" || abort "Failed to update $MAIN_FILE"
+# Update version in readme.txt
+if [[ -f "readme.txt" ]]; then
+  echo "📝 Updating version in readme.txt..."
+  sed -i "s/^Stable tag:\s*.*/Stable tag: $VERSION/" readme.txt
+fi
 
-echo "📝 Updating version in $README_FILE..."
-sed -i "s/Stable tag:\s*.*/Stable tag: $VERSION/" "$README_FILE" || abort "Failed to update $README_FILE"
-
-# Step 4: Build zip
+# Build ZIP
 echo "📦 Building ZIP: $ZIP_NAME"
 rm -f "$ZIP_NAME"
-ZIP_EXCLUDE_ARGS=()
-for exclude in "${EXCLUDES[@]}"; do
-  ZIP_EXCLUDE_ARGS+=("-x" "$PLUGIN_SLUG/$exclude")
-done
-(cd .. && zip -r "$ZIP_NAME" "$PLUGIN_SLUG" "${ZIP_EXCLUDE_ARGS[@]}") || abort "Failed to zip plugin"
+zip -r "$ZIP_NAME" . \
+  -x "*.git*" \
+     ".gitignore" \
+     "*.sh" \
+     "*.zip" \
+     "README.md" \
+     "build/*" \
+     "release.sh"
 
-# Step 5: Git tag
-echo "🔖 Creating Git tag v$VERSION..."
-git tag -d "v$VERSION" &>/dev/null
-git tag "v$VERSION"
-git add . && git commit -am "Release v$VERSION"
+# Commit and tag
+git add .
+git commit -m "Release v$VERSION"
+git tag -f "v$VERSION"
 
-# Step 6: Ensure remote exists or create it
+# Check for remote origin
 if ! git remote get-url origin &>/dev/null; then
   echo "🔗 No 'origin' remote found."
-  read -rp "Enter your GitHub username: " GH_USER
-  REPO_NAME="$PLUGIN_SLUG"
-  REPO_URL="https://github.com/$GH_USER/$REPO_NAME.git"
-
-  if gh repo view "$GH_USER/$REPO_NAME" &>/dev/null; then
-    echo "✅ GitHub repo already exists. Adding remote origin..."
-    git remote add origin "$REPO_URL" || abort "Failed to add remote"
-    git push -u origin main
-  else
-    echo "📡 Creating GitHub repository..."
-    gh repo create "$GH_USER/$REPO_NAME" --source=. --public --push || abort "Failed to create GitHub repo."
+  read -p "Enter your GitHub username: " GH_USER
+  REPO_NAME="$PLUGIN_DIR"
+  echo "📡 Attempting to create GitHub repository..."
+  if ! gh repo create "$GH_USER/$REPO_NAME" --public --source=. --push; then
+    echo "✅ GitHub repo likely already exists. Adding origin..."
+    git remote add origin "https://github.com/$GH_USER/$REPO_NAME.git"
+    git push -u origin main || echo "⚠️ Initial push may fail if branch is not 'main'."
   fi
-else
-  echo "🚀 Pushing to existing remote..."
-  git push origin main
-  git push origin "v$VERSION"
 fi
 
-# Step 7: Create GitHub release
-echo "🚀 Creating GitHub release..."
-gh release delete "v$VERSION" -y &>/dev/null
-gh release create "v$VERSION" "$ZIP_NAME" --title "v$VERSION" --notes "Release $VERSION" || abort "GitHub release failed"
+# Push changes and tag
+git push origin main || true
+git push origin "v$VERSION" || true
 
-echo "✅ Release v$VERSION complete and uploaded to GitHub!"
+# Create GitHub release
+echo "🚀 Creating GitHub release..."
+if ! gh release create "v$VERSION" "$ZIP_NAME" --title "v$VERSION" --notes "Release version $VERSION"; then
+  echo "❌ GitHub release failed"
+  exit 1
+fi
+
+echo "✅ Release v$VERSION complete!"
 
