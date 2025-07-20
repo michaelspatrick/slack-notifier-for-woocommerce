@@ -2,100 +2,106 @@
 
 set -e
 
-# ---------------------------
-# Configuration
-# ---------------------------
-
-PLUGIN_FILE=$(basename *.php)                     # e.g. plugin-name.php
-PLUGIN_DIR=$(basename "$PWD")                     # current directory name
+# ─── CONFIG ─────────────────────────────────────────────────────────────
+PLUGIN_DIR="$(basename "$PWD")"
 VERSION="$1"
-ZIP_NAME="../${PLUGIN_DIR}.zip"
-TAG="v${VERSION}"
-EXCLUDES=("*.git*" "*.sh" "*.DS_Store" "build/*" "README.md" "${ZIP_NAME##*/}")
+TAG="v$VERSION"
+ZIP_NAME="../$PLUGIN_DIR.zip"
 
-# ---------------------------
-# Helper Functions
-# ---------------------------
+# Files to exclude from zip
+EXCLUDES=(
+  ".git*"
+  "release.sh"
+  "README.md"
+  "readme.txt~"
+  "$ZIP_NAME"
+  "build/*"
+)
 
+# ─── HELPERS ─────────────────────────────────────────────────────────────
 abort() {
   echo "❌ $1"
   exit 1
 }
 
-update_version() {
-  echo "📝 Updating version in ${PLUGIN_FILE}..."
-  sed -i "s/^\(.*Version:\s*\).*$/\1${VERSION}/" "${PLUGIN_FILE}"
+# ─── CHECKS ─────────────────────────────────────────────────────────────
+[[ -z "$VERSION" ]] && abort "Usage: ./release.sh <version>"
 
-  echo "📝 Updating version in readme.txt..."
-  sed -i "s/^Stable tag:.*$/Stable tag: ${VERSION}/" readme.txt
-}
+if ! command -v git &>/dev/null; then
+  abort "Git not found"
+fi
 
-build_zip() {
-  echo "📦 Building ZIP: ${ZIP_NAME}"
-  zip -r "$ZIP_NAME" . "${EXCLUDES[@]/#/-x }" > /dev/null || abort "Failed to zip plugin"
-}
+if ! command -v gh &>/dev/null; then
+  abort "GitHub CLI (gh) not found"
+fi
 
-ensure_git_repo() {
-  if ! git rev-parse --is-inside-work-tree &>/dev/null; then
-    echo "⚠️ Not currently inside a Git repository. Initializing Git..."
-    git init
-    git add .
-    git commit -m "Initial commit for ${PLUGIN_DIR}"
-    echo "✅ Git repo initialized."
-  fi
-}
-
-mark_safe_dir() {
-  SAFE_DIR=$(git rev-parse --show-toplevel)
-  if ! git config --global --get-all safe.directory | grep -qx "$SAFE_DIR"; then
-    echo "⚠️ Git detected dubious ownership. Making directory safe..."
-    git config --global --add safe.directory "$SAFE_DIR"
-    echo "✅ Directory marked as safe for Git"
-  fi
-}
-
-create_tag() {
+if git rev-parse --is-inside-work-tree &>/dev/null; then
+  echo "📁 Inside Git repo"
+else
+  echo "⚠️ Not in a Git repo. Initializing..."
+  git init
   git add .
-  git commit -m "Release v${VERSION}" || echo "🔄 No changes to commit"
-  git tag -f "$TAG"
-  git push origin "$TAG" 2>/dev/null || echo "⚠️ Tag push failed (may already exist or no remote)"
-}
+  git commit -m "Initial commit for $PLUGIN_DIR"
+fi
 
-ensure_remote() {
-  if ! git remote get-url origin &>/dev/null; then
-    echo "🔗 No 'origin' remote found."
-    read -p "Enter your GitHub username: " GHUSER
-    REPO_URL="git@github.com:${GHUSER}/${PLUGIN_DIR}.git"
-    if gh repo view "$GHUSER/$PLUGIN_DIR" &>/dev/null; then
-      echo "✅ GitHub repo already exists. Adding remote origin..."
-      git remote add origin "$REPO_URL"
-    else
-      echo "📡 Creating GitHub repository..."
-      gh repo create "$GHUSER/$PLUGIN_DIR" --public --source=. --push || abort "Failed to create GitHub repo."
-    fi
+# ─── FIX DUBIOUS OWNERSHIP ─────────────────────────────────────────────
+if git config --show-origin --get-regexp 'safe.directory' | grep -q "$PWD"; then
+  :
+else
+  echo "⚠️ Git detected dubious ownership. Marking directory safe..."
+  git config --global --add safe.directory "$PWD"
+  echo "✅ Directory marked safe"
+fi
+
+# ─── REMOTE SETUP ───────────────────────────────────────────────────────
+if ! git remote | grep -q origin; then
+  echo "🔗 No 'origin' remote found."
+  read -p "Enter your GitHub username: " GH_USER
+  REPO_NAME="$PLUGIN_DIR"
+  if gh repo view "$GH_USER/$REPO_NAME" &>/dev/null; then
+    echo "✅ GitHub repo already exists. Adding remote origin..."
+    git remote add origin "https://github.com/$GH_USER/$REPO_NAME.git"
+  else
+    echo "📡 Creating GitHub repo..."
+    gh repo create "$GH_USER/$REPO_NAME" --public --source=. --push || abort "Failed to create GitHub repo"
   fi
-}
+fi
 
-create_release() {
-  echo "🚀 Creating GitHub release..."
-  gh release create "$TAG" "$ZIP_NAME" \
-    --title "Version $VERSION" \
-    --notes "Release of ${PLUGIN_DIR} version $VERSION" || abort "GitHub release failed"
-}
+# ─── PUSH MAIN BRANCH ────────────────────────────────────────────────────
+if ! git ls-remote --exit-code origin main &>/dev/null; then
+  echo "📤 Pushing main branch to origin..."
+  git checkout -B main
+  git push -u origin main || abort "Failed to push main branch"
+else
+  echo "✅ main branch already pushed"
+fi
 
-# ---------------------------
-# Main Logic
-# ---------------------------
+# ─── UPDATE VERSION IN FILES ─────────────────────────────────────────────
+echo "📝 Updating version in $PLUGIN_DIR.php..."
+sed -i "s/^\\(\\s*Version:\\s*\\).*$/\\1$VERSION/" "$PLUGIN_DIR.php"
 
-[[ -z "$VERSION" ]] && abort "Usage: ./release.sh 1.0"
+echo "📝 Updating version in readme.txt..."
+sed -i "s/^\\(\\s*Stable tag:\\s*\\).*$/\\1$VERSION/" readme.txt
 
-mark_safe_dir
-ensure_git_repo
-ensure_remote
-update_version
-build_zip
-create_tag
-create_release
+# ─── ZIP PLUGIN ─────────────────────────────────────────────────────────
+echo "📦 Building ZIP: $ZIP_NAME"
+zip -r "$ZIP_NAME" . -x "${EXCLUDES[@]}" || abort "Failed to zip plugin"
 
-echo "✅ Release v$VERSION complete and published to GitHub."
+# ─── COMMIT AND TAG ─────────────────────────────────────────────────────
+git add .
+git commit -m "Release v$VERSION" || echo "Nothing to commit"
+git tag -f "$TAG"
+git push origin "$TAG" || echo "⚠️ Tag push failed (may already exist or no remote)"
+
+# ─── DELETE EXISTING GITHUB RELEASE ─────────────────────────────────────
+if gh release view "$TAG" &>/dev/null; then
+  echo "⚠️ GitHub release $TAG exists. Deleting..."
+  gh release delete "$TAG" --yes || abort "Failed to delete release"
+fi
+
+# ─── CREATE GITHUB RELEASE ──────────────────────────────────────────────
+echo "🚀 Creating GitHub release..."
+gh release create "$TAG" "$ZIP_NAME" --title "Version $VERSION" --notes "Release version $VERSION" || abort "GitHub release failed"
+
+echo "✅ Release v$VERSION completed and published to GitHub."
 
