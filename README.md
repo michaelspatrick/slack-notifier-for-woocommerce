@@ -121,7 +121,7 @@ Available under **Settings → Slack Notifier**:
 To contribute or customize:
 
 ```bash
-git clone https://github.com/michaelspatrick/woocommerce-slack-notifier.git
+git clone https://github.com/michaelspatrick/slack-notifier-for-woocommerce.git
 ```
 
 ---
