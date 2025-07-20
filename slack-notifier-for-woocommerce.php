@@ -2,7 +2,7 @@
 /* 
 Plugin Name: Slack Notifier for WooCommerce
 Description: Sends order and inventory notifications to Slack using Slack blocks and markdown, grouped by thread. 
-Version: 1.0
+Version: 1.0.1
 Author: Michael Patrick
 License: GPLv2 or later
 Requires Plugins: woocommerce
