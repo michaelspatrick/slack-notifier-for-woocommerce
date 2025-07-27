@@ -2,7 +2,7 @@
 /* 
 Plugin Name: Slack Notifier for WooCommerce
 Description: Sends order and inventory notifications to Slack using Slack blocks and markdown, grouped by thread. 
-Version: 1.10
+Version: 1.11
 Author: Michael Patrick
 License: GPLv2 or later
 Requires Plugins: woocommerce
@@ -34,10 +34,7 @@ add_action('admin_notices', function () {
     $settings = get_option('wsn_settings');
 });
 
-
-
-
-
+add_action('woocommerce_thankyou', 'wsn_notify_new_order', 20, 1);
 add_action('woocommerce_order_status_changed', 'wsn_notify_order_status_change', 10, 4); 
 add_action('woocommerce_low_stock', 'wsn_notify_low_stock'); 
 add_action('woocommerce_no_stock', 'wsn_notify_no_stock'); 
@@ -559,6 +556,3 @@ function wsn_sanitize_settings($settings) {
     }
     return $settings;
 }
-
-
-
