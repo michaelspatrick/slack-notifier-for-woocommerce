@@ -2,7 +2,7 @@
 /* 
 Plugin Name: Slack Notifier for WooCommerce
 Description: Sends order and inventory notifications to Slack using Slack blocks and markdown, grouped by thread. 
-Version: 1.11
+Version: 1.12
 Author: Michael Patrick
 License: GPLv2 or later
 Requires Plugins: woocommerce
@@ -11,14 +11,8 @@ Requires Plugins: woocommerce
 if (!defined('ABSPATH')) exit; 
 
 register_activation_hook(__FILE__, 'wsn_check_woocommerce_active');
-define('WSN_SLACK_WEBHOOK', 'https://slack.com/api/chat.postMessage');
 
-function wsn_check_woocommerce_active() {
-    if (!is_plugin_active('woocommerce/woocommerce.php')) {
-        deactivate_plugins(plugin_basename(__FILE__));
-        wp_die('Slack Notifier for WooCommerce requires WooCommerce to be installed and active.');
-    }
-}
+define('WSN_SLACK_WEBHOOK', 'https://slack.com/api/chat.postMessage');
 
 add_action('admin_init', function () {
     if (!is_plugin_active('woocommerce/woocommerce.php')) {
@@ -34,22 +28,44 @@ add_action('admin_notices', function () {
     $settings = get_option('wsn_settings');
 });
 
+// New Orders
 add_action('woocommerce_thankyou', 'wsn_notify_new_order', 20, 1);
+add_action('woocommerce_payment_complete', 'wsn_notify_new_order', 20, 1);
+add_action('woocommerce_order_status_processing', 'wsn_notify_new_order', 20, 1);
+
+// Order Status Change
 add_action('woocommerce_order_status_changed', 'wsn_notify_order_status_change', 10, 4); 
-add_action('woocommerce_low_stock', 'wsn_notify_low_stock'); 
+
+// Stock
 add_action('woocommerce_no_stock', 'wsn_notify_no_stock'); 
 add_action('woocommerce_product_set_stock', 'wsn_check_product_details_on_stock_change', 10, 1); 
 add_action('woocommerce_product_set_stock_status', 'wsn_notify_backorder', 10, 2);
+add_action('woocommerce_low_stock', 'wsn_notify_low_stock'); 
+
+// Posts
 add_action('updated_post_meta', 'wsn_hook_meta_changes', 10, 4);
+add_action('publish_post', 'wsn_notify_new_post', 10, 2);
+
+// Products
 add_action('save_post_product', 'wsn_notify_product_change', 10, 3);
 add_action('save_post_product_variation', 'wsn_notify_product_change', 10, 3);
 
-add_action('publish_post', 'wsn_notify_new_post', 10, 2);
+// Customer
 add_action('user_register', 'wsn_notify_new_customer');
+
+// Reviews
 add_action('comment_post', 'wsn_notify_new_review', 10, 2);
 
+// Admin
 add_action('admin_menu', 'wsn_admin_menu');
 add_action('admin_init', 'wsn_register_settings');
+
+function wsn_check_woocommerce_active() {
+    if (!is_plugin_active('woocommerce/woocommerce.php')) {
+        deactivate_plugins(plugin_basename(__FILE__));
+        wp_die('Slack Notifier for WooCommerce requires WooCommerce to be installed and active.');
+    }
+}
 
 function wsn_admin_menu() {
     add_options_page(
@@ -500,6 +516,7 @@ function wsn_notify_order_status_change($order_id, $old_status, $new_status) {
                 "text" => "*Order Status Changed* :truck:\nOrder *#{$order_id}* changed from *{$old_status}* to *{$new_status}*"
             ]
         ],
+/*
         [
             "type" => "section",
             "fields" => [
@@ -510,6 +527,7 @@ function wsn_notify_order_status_change($order_id, $old_status, $new_status) {
                 [ "type" => "mrkdwn", "text" => "*Date:* {$order_date}" ],
             ]
         ]
+*/
     ];
 
     wsn_send_to_slack($text, $blocks, null, 'channel_orders'); // Change channel key as needed
@@ -546,7 +564,6 @@ function wsn_notify_low_stock($product) {
 
     wsn_send_to_slack($text, $blocks, null, 'channel_products'); // Adjust channel key as needed
 }
-
 
 function wsn_sanitize_settings($settings) {
     foreach ($settings as $key => $value) {
